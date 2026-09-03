@@ -1,0 +1,71 @@
+name: Publish Shopify theme once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publish-shopify-theme-once.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopify-production-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: shopify-production
+    timeout-minutes: 10
+
+    env:
+      SHOPIFY_STORE: ${{ vars.SHOPIFY_STORE || 'store.mrsoftware.dk' }}
+      SHOPIFY_CLI_THEME_TOKEN: ${{ secrets.SHOPIFY_CLI_THEME_TOKEN }}
+      THEME_ID: '203150754126'
+
+    steps:
+      - name: Validate required secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${SHOPIFY_CLI_THEME_TOKEN:-}" || { echo '::error::Missing SHOPIFY_CLI_THEME_TOKEN'; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Shopify CLI
+        run: npm install --global @shopify/cli@latest
+
+      - name: Publish theme
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopify theme publish \
+            --theme "$THEME_ID" \
+            --store "$SHOPIFY_STORE" \
+            --password "$SHOPIFY_CLI_THEME_TOKEN" \
+            --force
+
+      - name: Verify live theme
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopify theme list \
+            --store "$SHOPIFY_STORE" \
+            --password "$SHOPIFY_CLI_THEME_TOKEN" \
+            --json > /tmp/themes.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const raw = JSON.parse(fs.readFileSync('/tmp/themes.json', 'utf8'));
+          const list = Array.isArray(raw) ? raw : (raw.themes || []);
+          const id = process.env.THEME_ID;
+          const target = list.find(t => String(t.id).replace(/^gid:\/\/shopify\/OnlineStoreTheme\//, '') === id);
+          const role = String(target?.role || '').toLowerCase();
+          if (!target || (role !== 'main' && role !== 'live')) {
+            console.error(`Theme ${id} is not live after publish (role=${target?.role || 'missing'}).`);
+            process.exit(1);
+          }
+          console.log(`Theme ${id} publish verified.`);
+          NODE
