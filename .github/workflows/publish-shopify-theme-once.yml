@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 10
 
     env:
-      SHOPIFY_STORE: ${{ vars.SHOPIFY_STORE || 'store.mrsoftware.dk' }}
+      SHOPIFY_STORE: ${{ vars.SHOPIFY_STORE || 'x1a0bq-ak.myshopify.com' }}
       SHOPIFY_CLI_THEME_TOKEN: ${{ secrets.SHOPIFY_CLI_THEME_TOKEN }}
       THEME_ID: '203150754126'
 
