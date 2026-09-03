@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 10
 
     env:
-      SHOPIFY_STORE: ${{ vars.SHOPIFY_STORE || 'store.mrsoftware.dk' }}
+      SHOPIFY_STORE: ${{ vars.SHOPIFY_STORE || 'x1a0bq-ak.myshopify.com' }}
       SHOPIFY_CLI_THEME_TOKEN: ${{ secrets.SHOPIFY_CLI_THEME_TOKEN }}
 
     steps:
@@ -42,7 +42,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install Shopify CLI
         run: npm install --global @shopify/cli@latest
