@@ -1,0 +1,116 @@
+name: Publish Shopify theme
+
+on:
+  workflow_dispatch:
+    inputs:
+      theme_id:
+        description: "Unpublished Shopify theme ID to publish"
+        required: true
+        default: "203150754126"
+      confirm:
+        description: "Type PUBLISH to confirm production publish"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopify-production-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: ${{ inputs.confirm == 'PUBLISH' }}
+    runs-on: ubuntu-latest
+    environment: shopify-production
+    timeout-minutes: 10
+
+    env:
+      SHOPIFY_STORE: ${{ vars.SHOPIFY_STORE || 'store.mrsoftware.dk' }}
+      SHOPIFY_CLI_THEME_TOKEN: ${{ secrets.SHOPIFY_CLI_THEME_TOKEN }}
+
+    steps:
+      - name: Validate required secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SHOPIFY_CLI_THEME_TOKEN:-}" ]; then
+            echo "::error::Missing GitHub secret SHOPIFY_CLI_THEME_TOKEN in environment shopify-production (or repository)."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Shopify CLI
+        run: npm install --global @shopify/cli@latest
+
+      - name: Verify target theme exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopify theme list \
+            --store "$SHOPIFY_STORE" \
+            --password "$SHOPIFY_CLI_THEME_TOKEN" \
+            --json > /tmp/themes-before.json
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const themes = JSON.parse(fs.readFileSync('/tmp/themes-before.json', 'utf8'));
+          const id = String(process.env.THEME_ID);
+          const list = Array.isArray(themes) ? themes : (themes.themes || []);
+          const target = list.find(t => String(t.id).replace(/^gid:\/\/shopify\/OnlineStoreTheme\//, '') === id);
+          if (!target) {
+            console.error(`Target theme ${id} was not found.`);
+            process.exit(1);
+          }
+          const role = String(target.role || '').toLowerCase();
+          if (role === 'main' || role === 'live') {
+            console.error(`Target theme ${id} is already live; refusing redundant publish.`);
+            process.exit(1);
+          }
+          console.log(`Target verified: ${target.name || id} (${target.role || 'unpublished'})`);
+          NODE
+        env:
+          THEME_ID: ${{ inputs.theme_id }}
+
+      - name: Publish selected theme
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopify theme publish \
+            --theme "${{ inputs.theme_id }}" \
+            --store "$SHOPIFY_STORE" \
+            --password "$SHOPIFY_CLI_THEME_TOKEN" \
+            --force
+
+      - name: Verify selected theme is live
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopify theme list \
+            --store "$SHOPIFY_STORE" \
+            --password "$SHOPIFY_CLI_THEME_TOKEN" \
+            --json > /tmp/themes-after.json
+
+          node - <<'NODE'
+          const fs = require('fs');
+          const themes = JSON.parse(fs.readFileSync('/tmp/themes-after.json', 'utf8'));
+          const id = String(process.env.THEME_ID);
+          const list = Array.isArray(themes) ? themes : (themes.themes || []);
+          const target = list.find(t => String(t.id).replace(/^gid:\/\/shopify\/OnlineStoreTheme\//, '') === id);
+          if (!target) {
+            console.error(`Published theme ${id} disappeared from theme list.`);
+            process.exit(1);
+          }
+          const role = String(target.role || '').toLowerCase();
+          if (role !== 'main' && role !== 'live') {
+            console.error(`Theme ${id} is not live after publish (role=${target.role || 'unknown'}).`);
+            process.exit(1);
+          }
+          console.log(`Publish verified: ${target.name || id} is live.`);
+          NODE
+        env:
+          THEME_ID: ${{ inputs.theme_id }}
